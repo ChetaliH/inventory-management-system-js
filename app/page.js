@@ -1,66 +1,88 @@
 'use client';
-
-import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Typography, Button, Box, TextField, Stack, Modal } from "@mui/material";
-import React, { useState, useEffect, useRef } from "react";
-import { firestore } from "./firebase";
-import { collection, doc, query, getDocs, deleteDoc, setDoc, getDoc } from "firebase/firestore";
-import { storage } from "./firebase";
-import { Camera } from "react-camera-pro";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Typography,
+  Button,
+  Box,
+  TextField,
+  Stack,
+  Modal,
+} from '@mui/material';
+import React, { useState, useEffect, useRef } from 'react';
+import { firestore } from './firebase';
+import {
+  collection,
+  doc,
+  query,
+  getDocs,
+  deleteDoc,
+  setDoc,
+  getDoc,
+} from 'firebase/firestore';
+import { storage } from './firebase';
+import { Camera } from 'react-camera-pro';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 export default function Home() {
   const [inventory, setInventory] = useState([]);
   const [open, setOpen] = useState(false);
   const [itemName, setItemName] = useState('');
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState('');
   const [cameraVisible, setCameraVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
-  const [imageUrl, setImageUrl] = useState(null);
+  const [capturedPhoto, setCapturedPhoto] = useState(null);
   const camera = useRef(null);
 
   const capturePhoto = async () => {
     try {
       if (camera.current) {
-        // Check if the device has a camera
         const hasCamera = camera.current.getNumberOfCameras() > 0;
         if (!hasCamera) {
-          alert("No camera device accessible. Please connect your camera or try a different browser.");
+          alert(
+            'No camera device accessible. Please connect your camera or try a different browser.'
+          );
           return;
         }
 
         const imageSrc = camera.current.takePhoto();
-        await uploadImage(imageSrc);
+        setCapturedPhoto({ src: imageSrc, item: selectedItem }); // Track item with photo
         setCameraVisible(false);
       }
     } catch (error) {
-      console.error("Error capturing photo:", error);
-      alert("Failed to capture photo. Please ensure your camera is accessible and try again.");
+      console.error('Error capturing photo:', error);
+      alert(
+        'Failed to capture photo. Please ensure your camera is accessible and try again.'
+      );
     }
   };
 
-  const uploadImage = async (imageSrc) => {
+  const uploadImage = async (imageSrc, itemName) => {
     try {
       const response = await fetch(imageSrc);
       const blob = await response.blob();
 
-      const name = `${selectedItem}-${Date.now()}.jpg`;
+      const name = `${itemName}-${Date.now()}.jpg`;
       const storageRef = ref(storage, `images/${name}`);
       await uploadBytes(storageRef, blob);
       const url = await getDownloadURL(storageRef);
 
-      const itemDocRef = doc(firestore, 'inventory', selectedItem);
+      const itemDocRef = doc(firestore, 'inventory', itemName);
       await setDoc(itemDocRef, { imageUrl: url }, { merge: true });
 
-      console.log(`Uploaded image for ${selectedItem} available at: ${url}`);
-      setImageUrl(url);
+      console.log(`Uploaded image for ${itemName} available at: ${url}`);
+      setCapturedPhoto(null);
       setSelectedItem(null);
+      updateInventory(); // Update inventory after uploading the image
     } catch (error) {
-      console.error("Error uploading image:", error);
+      console.error('Error uploading image:', error);
     }
   };
-  
-
-
 
   const style = {
     position: 'absolute',
@@ -77,16 +99,34 @@ export default function Home() {
     gap: 3,
   };
 
+  const imageExists = async (url) => {
+    try {
+      const response = await fetch(url, { method: 'HEAD' });
+      return response.ok;
+    } catch (error) {
+      console.error('Error checking image existence:', error);
+      return false;
+    }
+  };
+
   const updateInventory = async () => {
     const snapshot = query(collection(firestore, 'inventory'));
     const docs = await getDocs(snapshot);
-    const inventoryList = [];
-    docs.forEach((doc) => {
-      inventoryList.push({
-        name: doc.id,
-        ...doc.data(),
-      });
-    });
+    const inventoryList = await Promise.all(
+      docs.docs.map(async (doc) => {
+        const data = doc.data();
+        const imageUrl = data.imageUrl ? data.imageUrl : null;
+
+        // Check if the image exists
+        const imageExistsCheck = imageUrl ? await imageExists(imageUrl) : false;
+
+        return {
+          name: doc.id,
+          ...data,
+          imageUrl: imageExistsCheck ? imageUrl : null, // Set to null if image doesn't exist
+        };
+      })
+    );
     setInventory(inventoryList);
   };
 
@@ -125,7 +165,7 @@ export default function Home() {
   const handleOpen = () => setOpen(true);
   const handleClose = () => setOpen(false);
 
-  const filteredInventory = inventory.filter(item =>
+  const filteredInventory = inventory.filter((item) =>
     item.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -137,17 +177,17 @@ export default function Home() {
       flexDirection={'column'}
       alignItems={'center'}
     >
-      <Box 
-        width="800px" 
-        position="sticky" 
-        top={0} 
-        bgcolor="white" 
-        zIndex={1} 
-        mb={2} 
-        p={2} 
+      <Box
+        width="800px"
+        position="sticky"
+        top={0}
+        bgcolor="white"
+        zIndex={1}
+        mb={2}
+        p={2}
         display="flex"
         justifyContent="flex-start"
-        gap={2} 
+        gap={2}
       >
         <TextField
           id="search-bar"
@@ -163,43 +203,38 @@ export default function Home() {
             pt: 1,
             pb: 1,
             '& .MuiOutlinedInput-root': {
-              borderRadius: '8px', 
+              borderRadius: '8px',
             },
             '& .MuiInputBase-root': {
-              height: '40px', 
+              height: '40px',
             },
             '& .MuiInputBase-input': {
-              padding: '8px 12px', 
+              padding: '8px 12px',
             },
           }}
           InputProps={{
             style: {
-              height: 'inherit', 
-            }
+              height: 'inherit',
+            },
           }}
         />
-        <Button 
-          variant="outlined" 
-          onClick={handleOpen} 
+        <Button
+          variant="outlined"
+          onClick={handleOpen}
           sx={{
-            height:'36px',
-            padding: '6px 16px', 
+            height: '36px',
+            padding: '6px 16px',
             fontSize: '8px',
             '&:hover': {
               borderColor: '#0056b3',
-            } ,
+            },
           }}
         >
           Add New Item
         </Button>
       </Box>
 
-      <Modal
-        open={open}
-        onClose={handleClose}
-        aria-labelledby="modal-modal-title"
-        aria-describedby="modal-modal-description"
-      >
+      <Modal open={open} onClose={handleClose}>
         <Box sx={style}>
           <Typography id="modal-modal-title" variant="h6" component="h2">
             Add Item
@@ -226,7 +261,7 @@ export default function Home() {
           </Stack>
         </Box>
       </Modal>
-      
+
       <TableContainer component={Paper} width="800px" overflow="auto">
         <Table>
           <TableHead>
@@ -234,13 +269,16 @@ export default function Home() {
               <TableCell>Name</TableCell>
               <TableCell>Quantity</TableCell>
               <TableCell>Actions</TableCell>
-              <TableCell>Image</TableCell>
+              <TableCell>Avatar</TableCell>
+              <TableCell>Upload Image</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {filteredInventory.map(({ name, quantity, imageUrl }) => (
               <TableRow key={name}>
-                <TableCell>{name.charAt(0).toUpperCase() + name.slice(1)}</TableCell>
+                <TableCell>
+                  {name.charAt(0).toUpperCase() + name.slice(1)}
+                </TableCell>
                 <TableCell>{quantity}</TableCell>
                 <TableCell>
                   <Button
@@ -251,11 +289,11 @@ export default function Home() {
                       padding: '6px 16px',
                       fontSize: '14px',
                       marginRight: '8px',
-                      borderColor: 'green', 
-                      color: 'green', 
+                      borderColor: 'green',
+                      color: 'green',
                       '&:hover': {
-                        borderColor: 'darkgreen', 
-                        color: 'darkgreen', 
+                        borderColor: 'darkgreen',
+                        color: 'darkgreen',
                       },
                     }}
                   >
@@ -268,11 +306,11 @@ export default function Home() {
                       height: '36px',
                       padding: '6px 16px',
                       fontSize: '14px',
-                      borderColor: 'red', 
-                      color: 'red', 
+                      borderColor: 'red',
+                      color: 'red',
                       '&:hover': {
-                        borderColor: 'darkred', 
-                        color: 'darkred', 
+                        borderColor: 'darkred',
+                        color: 'darkred',
                       },
                     }}
                   >
@@ -281,7 +319,11 @@ export default function Home() {
                 </TableCell>
                 <TableCell>
                   {imageUrl ? (
-                    <img src={imageUrl} alt={`${name} image`} style={{ width: '100px', height: 'auto' }} />
+                    <img
+                      src={imageUrl}
+                      alt={`${name} avatar`}
+                      style={{ width: '100px', height: 'auto' }}
+                    />
                   ) : (
                     <Button
                       variant="outlined"
@@ -300,6 +342,26 @@ export default function Home() {
                     </Button>
                   )}
                 </TableCell>
+                <TableCell>
+                  {capturedPhoto && capturedPhoto.item === name && (
+                    <Box>
+                      <img
+                        src={capturedPhoto.src}
+                        alt="Captured"
+                        style={{ width: '100px', height: 'auto' }}
+                      />
+                      <Button
+                        onClick={() =>
+                          uploadImage(capturedPhoto.src, capturedPhoto.item)
+                        }
+                        variant="contained"
+                        color="primary"
+                      >
+                        Upload Photo
+                      </Button>
+                    </Box>
+                  )}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -311,7 +373,6 @@ export default function Home() {
           open={cameraVisible}
           onClose={() => setCameraVisible(false)}
           aria-labelledby="camera-modal-title"
-          aria-describedby="camera-modal-description"
         >
           <Box sx={{ ...style, width: 'auto' }}>
             <Camera ref={camera} />
